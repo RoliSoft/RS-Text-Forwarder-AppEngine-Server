@@ -29,7 +29,24 @@ from google.appengine.api import xmpp
 from google.appengine.ext import db
 from google.appengine.ext.webapp import xmpp_handlers
 
+# Global variables that need to be configured.
+
+APPID  = 'rstxtfwd'  # <APPID>.appspot.com
+GCMKEY = ''  # key for Google Cloud Messaging
+FWDCMD = True  # whether to push commands to the device that don't have server-side implementation
+
+# Touching anything below this line voids your warranty, which you would've known you don't have in the first place if you would've read the license.
+
+XMPUB  = '%s@appspot.com' % (APPID)
+XMPRIV = '@%s.appspotchat.com' % (APPID)
+
+# Classes for the AppEngine Datastore
+
 class User(db.Model):
+	"""
+		Represents a registered user.
+	"""
+	
 	email = db.StringProperty()
 	regid = db.StringProperty()
 	lastjid = db.StringProperty()
@@ -39,12 +56,26 @@ class User(db.Model):
 	def gacc(self):
 		return self.key().name()
 
+# Request and message handler implementations
+
 class MainHandler(webapp2.RequestHandler):
 	def get(self):
+		"""
+			Tells users to fuck off. Once this project gets into an "okay" state,
+			it'll redirect the users to the Github repositories.
+		"""
+		
 		self.response.write('This is an XMPP/SMS forwarder service for Android. It is being developed. Stay tuned.')
 
 class SendHandler(webapp2.RequestHandler):
 	def post(self):
+		"""
+			Sends an XMPP message the registered address of the user.
+			This is the endpoint the Android client calls to send a message via XMPP.
+			Due to the funny way Google's XMPP implementation works, you may or may not get an
+			immediate error message if the delivery failed. If not, it'll receive in ErrorHandler.
+		"""
+		
 		gacc = self.request.get('gacc')
 		sender = self.request.get('from')
 		body = self.request.get('body').encode('utf-8')
@@ -62,10 +93,10 @@ class SendHandler(webapp2.RequestHandler):
 			to = user.lastjid
 		
 		if not sender:
-			src = 'rstxtfwd@appspot.com'
+			src = XMPUB
 		else:
 			src = re.sub("(^\.+|(?<=\.)\.+|\.+$)", "", re.sub("[^a-z0-9]", ".", unicodedata.normalize('NFKD', sender.lower()).encode('ascii', 'ignore').lower()))
-			src = '%s@rstxtfwd.appspotchat.com' % (src)
+			src = src + XMPRIV
 		
 		logging.info('Sending XMPP from %s to %s: %s' % (src, to, body))
 		
@@ -82,6 +113,11 @@ class SendHandler(webapp2.RequestHandler):
 
 class RegistrationHandler(webapp2.RequestHandler):
 	def post(self):
+		"""
+			Receives a new registration with Google Account, GCM registration ID, and the preferred
+			XMPP address. Old registrations for the same Google Account will be discarded.
+		"""
+		
 		gacc = self.request.get('gacc')
 		email = self.request.get('email')
 		regid = self.request.get('regid')
@@ -115,6 +151,11 @@ class RegistrationHandler(webapp2.RequestHandler):
 
 class PingbackHandler(webapp2.RequestHandler):
 	def post(self):
+		"""
+			Receives a pingback with timestamp from the device.
+			See ping_command in XmppHandler for the counterpart.
+		"""
+		
 		gacc = self.request.get('gacc')
 		then = float(self.request.get('time'))
 		to = gacc
@@ -133,17 +174,29 @@ class PingbackHandler(webapp2.RequestHandler):
 		diff = now - then
 		
 		logging.info('Pingback received from %s\'s device after %.7f seconds.' % (gacc, diff))		
-		xmpp.send_message(to, 'Pingback received from device after %.3f seconds.' % (diff), 'rstxtfwd@appspot.com')
+		xmpp.send_message(to, 'Pingback received from device after %.3f seconds.' % (diff), XMPUB)
 		self.response.write(json.dumps({"res":"ok"}))
 
 class ErrorHandler(webapp2.RequestHandler):
 	def post(self):
+		"""
+			Receives an error message. It is most likely a bounced message.
+			See the documentation for PresenceHandler on more info why this occurs.
+		"""
+		
 		sender = self.request.get('from')
 		stanza = self.request.get('stanza')
 		logging.error('Error received from %s: %s' % (sender, stanza))
 
 class PresenceHandler(webapp2.RequestHandler):
 	def post(self, status):
+		"""
+			Receives presence status from users who have added at least one of the application's
+			addresses to their friends list. GMail and GVGW will be skipped, as they're not "real clients".
+			This is a very important part of the application, because it receives and saves the full JID
+			of the user. Without a full JID, the messages may not be delivered properly and be bounced.
+		"""
+		
 		sender = self.request.get('from')
 		logging.info('User %s is now %s.' % (sender, status))
 		
@@ -169,45 +222,44 @@ class PresenceHandler(webapp2.RequestHandler):
 
 class XmppHandler(xmpp_handlers.CommandHandler):
 	def help_command(self, message=None):
-		message.reply('List of supported commands:\n/ping — Pings your device.\n/contact [name] — Searches for the specified contact and lists all matches with phone numbers.\n/send [name]: [text] — Sends the specified text to the specified contact. In case of multiple matches for the name parameter, you will receive an error.\n/chat [name] — Opens a new session in your Jabber/Talk client from [name]@rstxtfwd.appspotchat.com, and any message entered here will be sent directly to this contact.\n/locate — Sends the last-known network and GPS coordinates.\nThe name parameter can be a partial or full name or phone number. In case multiple phone numbers are associated to the same contact, you can append /N to the parameter where N is the index of the phone number as listed by /contact.')
+		"""
+			Replies with a list of commands that are supported on the server or device,
+			depending which is requested in the first parameter.
+		"""
+		
+		if message.arg == "device":
+			if not FWDCMD:
+				message.reply('This server does not forward unhandled commands to the device.')
+			else:
+				message.reply('Pushing list request to your device...')
+				if not self.send_gcm(user.regid, {'action':'help'}, message.to):
+					message.reply('Failed to send the push notification to your device.')
+		else:
+			message.reply('List of supported commands:\n/help device — Requests the list of commands your device supports.\n/ping — Pings your device.\n/send [name]: [text] — Sends the specified text to the specified contact. In case of multiple matches for the name parameter, you will receive an error.\n/chat [name] — Opens a new session in your Jabber/Talk client from [name]%s, and any message entered here will be sent directly to this contact.\nThe name parameter can be a partial or full name or phone number. In case multiple phone numbers are associated to the same contact, you can append /N to the parameter where N is the index of the phone number as listed by /contact.' % (XMPRIV))
 	
 	def ping_command(self, message=None):
-		user = self.get_user(message.sender)
-		if user is None:
-			message.reply('Your XMPP address is not registered.')
+		"""
+			Pushes a ping notification to the device with a timestamp. The device will return this
+			timestamp once it got the notification by requesting /pingback on this server, at
+			which point the user will receive a message containing the total round-trip time.
+		"""
+		
+		user = self.get_user(message)
+		if not user:
 			return
-		elif '/' in message.sender:
-			user.lastjid = message.sender
-			user.status = 'available'
-			user.put()
 		
 		message.reply('Pushing ping notification to your device...')
-		if not self.send_gcm(user.regid, {'action':'ping','time':time.time()}):
-			message.reply('Failed to send the push notification to your device.')
-	
-	def locate_command(self, message=None):
-		user = self.get_user(message.sender)
-		if user is None:
-			message.reply('Your XMPP address is not registered.')
-			return
-		elif '/' in message.sender:
-			user.lastjid = message.sender
-			user.status = 'available'
-			user.put()
-		
-		message.reply('Pushing location request to your device...')
-		if not self.send_gcm(user.regid, {'action':'locate'}):
+		if not self.send_gcm(user.regid, {'action':'ping','time':time.time()}, message.to):
 			message.reply('Failed to send the push notification to your device.')
 	
 	def send_command(self, message=None):
-		user = self.get_user(message.sender)
-		if user is None:
-			message.reply('Your XMPP address is not registered.')
+		"""
+			Pushes a "send SMS" notification to the device forwarding the specified parameters.
+		"""
+		
+		user = self.get_user(message)
+		if not user:
 			return
-		elif '/' in message.sender:
-			user.lastjid = message.sender
-			user.status = 'available'
-			user.put()
 		
 		if not ':' in message.arg:
 			message.reply('Invalid parameters: name/text separator was not found.')
@@ -216,58 +268,78 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 		contact = message.arg.split(':', 2)[0].strip()
 		body = message.arg.split(':', 2)[1].strip()
 		message.reply('Pushing message for %s: "%s"' % (contact, ('%s[...]' % (body[:50])) if body.__len__() > 50 else body))
-		if not self.send_gcm(user.regid, {'action':'text','to':contact,'body':body,'xmback':''}):
+		if not self.send_gcm(user.regid, {'action':'text','to':contact,'body':body}, message.to):
 			message.reply('Failed to send the push notification to your device.')
 	
 	def chat_command(self, message=None):
-		user = self.get_user(message.sender)
-		if user is None:
-			message.reply('Your XMPP address is not registered.')
+		"""
+			Opens a new session by replying from a different address dedicated to the user specified in the parameters.
+			The name is cleaned by converting unicode to their ASCII representation and stripping non-alphanumeric characters.
+			For example "Árvíztűrő-tükörfúrógép" will become "arvizturo.tukorfurogep".
+		"""
+		
+		user = self.get_user(message)
+		if not user:
 			return
-		elif '/' in message.sender:
-			user.lastjid = message.sender
-			user.status = 'available'
-			user.put()
 		
 		message.reply('Opening dedicated chat window with %s...' % (message.arg))
 		src = re.sub("(^\.+|(?<=\.)\.+|\.+$)", "", re.sub("[^a-z0-9]", ".", unicodedata.normalize('NFKD', message.arg.lower()).encode('ascii', 'ignore').lower()))
-		xmpp.send_message(message.sender, 'All messages in this window will be forwarded to %s.' % (message.arg), '%s@rstxtfwd.appspotchat.com' % (src))
+		xmpp.send_message(message.sender, 'All messages in this window will be forwarded to %s.' % (message.arg), src + XMPRIV)
 	
 	def unhandled_command(self, message=None):
-		user = self.get_user(message.sender)
-		if user is None:
-			message.reply('Your XMPP address is not registered.')
-			return
-		elif '/' in message.sender:
-			user.lastjid = message.sender
-			user.status = 'available'
-			user.put()
+		"""
+			Handles a command that has no server implementation. If FWDCMD is True, it does so by pushing the command
+			to the device in hopes it can do something with it. If the device couldn't handle it either, or FWDCMD is
+			set to False, an error message will be sent.
+		"""
 		
-		message.reply('The specified command "%s" is not supported. Reply /help for the list of supported commands.' % (message.command))
+		user = self.get_user(message)
+		if not user:
+			return
+		
+		prep = ''
+		if XMPRIV in message.to:
+			prep = '*** '
+		
+		if not FWDCMD:
+			message.reply('%sThe specified command "%s" is not supported. Reply /help for the list of supported commands.' % (prep, message.command))
+			return
+		
+		message.reply('%sPushing command %s to device...' % (prep, message.command))
+		if not self.send_gcm(user.regid, {'action':'cmd','cmd':message.command,'arg':message.arg}, message.to):
+			message.reply('%sFailed to send the push notification to your device.' % (prep))
 	
 	def text_message(self, message=None):
-		user = self.get_user(message.sender)
-		if user is None:
-			message.reply('Your XMPP address is not registered.')
+		"""
+			Handles messages that don't start with a command.
+			For messages sent to <app>@appspot.com, it replies with an error message;
+			for messages sent to <name>@<app>.appspotchat.com, pushes a "send SMS" notification to the device.
+		"""
+		
+		user = self.get_user(message)
+		if not user:
 			return
-		elif '/' in message.sender:
-			user.lastjid = message.sender
-			user.status = 'available'
-			user.put()
 		
 		to = message.to.split('/')[0]
-		if to == "rstxtfwd@appspot.com":
+		if to == XMPUB:
 			message.reply('Messages not starting with a command are not supported in this context. Reply /help for the list of supported commands.')
-		elif "@rstxtfwd.appspotchat.com" in to:
+		elif XMPRIV in to:
 			contact = to.split('@')[0]
 			body = message.body.strip()
 			message.reply('*** Pushing message: "%s"' % (('%s[...]' % (body[:50])) if body.__len__() > 50 else body))
-			if not self.send_gcm(user.regid, {'action':'text','to':contact,'body':body,'xmback':contact}):
-				message.reply('Failed to send the push notification to your device.')
+			if not self.send_gcm(user.regid, {'action':'text','to':contact,'body':body}, contact, True):
+				message.reply('*** Failed to send the push notification to your device.')
 		else:
-			message.reply('The context of this address is unknown. Please use either rstxtfwd@appspot.com or [name]@rstxtfwd.appspotchat.com.')
+			message.reply('The context of this address is unknown. Please use either %s or [name]%s.' % (XMPUB, XMPRIV))
 	
-	def send_gcm(self, regid, data):
+	def send_gcm(self, regid, data, xmback=None, xmpriv=False):
+		"""
+			Pushes a notification to the device through Google Cloud Messaging.
+		"""
+		
+		data['_addr'] = xmback if not xmback is None else XMPUB
+		data['_priv'] = xmpriv
+		
 		logging.info('Pushing to device: %s' % (json.dumps(data)))
 		result = urlfetch.fetch(url = 'https://android.googleapis.com/gcm/send',
 			payload = json.dumps({
@@ -277,7 +349,7 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 			method = urlfetch.POST,
 			headers = {
 				'Content-Type': 'application/json',
-				'Authorization': 'key=AIzaSyCOEaYP9f6ck7nMvp16c9yKUROxEeWjgGU'
+				'Authorization': 'key=' + GCMKEY
 			}
 		)
 		
@@ -293,8 +365,27 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 			logging.info('Push failed with HTTP %i: %s' % (result.status_code, result.content))
 			return False
 	
-	def get_user(self, sender):
-		return User.get_by_key_name(sender.split('/')[0])
+	def get_user(self, message=None):
+		"""
+			Fetches the user from the database for the specified JID.
+		"""
+		
+		if not message:
+			return
+		
+		user = User.get_by_key_name(message.sender.split('/')[0])
+		
+		if user is None:
+			message.reply('Your XMPP address is not registered.')
+			return
+		elif '/' in message.sender:
+			user.lastjid = message.sender
+			user.status = 'available'
+			user.put()
+		
+		return user
+
+# Routing definitions for the handlers above
 
 app = webapp2.WSGIApplication([
 	('/', MainHandler),
