@@ -337,8 +337,11 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 			Pushes a notification to the device through Google Cloud Messaging.
 		"""
 		
-		data['_addr'] = xmback if not xmback is None else XMPUB
-		data['_priv'] = xmpriv
+		if not xmback is None or xmback != XMPUB:
+			data['_addr'] = xmback
+		
+		if xmpriv:
+			data['_priv'] = True
 		
 		logging.info('Pushing to device: %s' % (json.dumps(data)))
 		result = urlfetch.fetch(url = 'https://android.googleapis.com/gcm/send',
