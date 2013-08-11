@@ -94,6 +94,8 @@ class SendHandler(webapp2.RequestHandler):
 		
 		if not sender:
 			src = XMPUB
+		elif sender == XMPUB or XMPRIV in sender:
+			src = sender
 		else:
 			src = re.sub("(^\.+|(?<=\.)\.+|\.+$)", "", re.sub("[^a-z0-9]", ".", unicodedata.normalize('NFKD', sender.lower()).encode('ascii', 'ignore').lower()))
 			src = src + XMPRIV
@@ -232,7 +234,7 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 				message.reply('This server does not forward unhandled commands to the device.')
 			else:
 				message.reply('Pushing list request to your device...')
-				if not self.send_gcm(user.regid, {'action':'help'}, message.to):
+				if not self.send_gcm(user.regid, {'action':'cmd','cmd':'help','arg':''}, message.to):
 					message.reply('Failed to send the push notification to your device.')
 		else:
 			message.reply('List of supported commands:\n/help device — Requests the list of commands your device supports.\n/ping — Pings your device.\n/send [name]: [text] — Sends the specified text to the specified contact. In case of multiple matches for the name parameter, you will receive an error.\n/chat [name] — Opens a new session in your Jabber/Talk client from [name]%s, and any message entered here will be sent directly to this contact.\nThe name parameter can be a partial or full name or phone number. In case multiple phone numbers are associated to the same contact, you can append /N to the parameter where N is the index of the phone number as listed by /contact.' % (XMPRIV))
@@ -302,7 +304,7 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 			prep = '*** '
 		
 		if not FWDCMD:
-			message.reply('%sThe specified command "%s" is not supported. Reply /help for the list of supported commands.' % (prep, message.command))
+			message.reply('%sThe specified command "%s" is not supported. Reply "/help server" or "/help device" for the list of supported commands.' % (prep, message.command))
 			return
 		
 		message.reply('%sPushing command %s to device...' % (prep, message.command))
