@@ -78,7 +78,7 @@ class SendHandler(webapp2.RequestHandler):
 		
 		gacc = self.request.get('gacc')
 		sender = self.request.get('from')
-		body = self.request.get('body').encode('utf-8')
+		body = self.request.get('body')
 		to = gacc
 		err = None
 		
@@ -222,6 +222,14 @@ class PresenceHandler(webapp2.RequestHandler):
 		except Exception, err:
 			logging.error('Unable to save lastjid=%s && status=%s for user %s: %s' % (sender, stauts, gacc, str(err)))
 
+class ProbeHandler(webapp2.RequestHandler):
+	def post(self):
+		"""
+			Dummy handler until I figure out what is POSTed.
+		"""
+		
+		logging.info('POST data: %s' % (json.dumps(self.request.POST)))
+
 class XmppHandler(xmpp_handlers.CommandHandler):
 	def help_command(self, message=None):
 		"""
@@ -229,12 +237,16 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 			depending which is requested in the first parameter.
 		"""
 		
+		user = self.get_user(message)
+		if not user:
+			return
+		
 		if message.arg == "device":
 			if not FWDCMD:
 				message.reply('This server does not forward unhandled commands to the device.')
 			else:
-				message.reply('Pushing list request to your device...')
-				if not self.send_gcm(user.regid, {'action':'cmd','cmd':'help','arg':''}, message.to):
+				message.reply('Pushing help request to your device...')
+				if not self.send_gcm(user.regid, {'action':'cmd','cmd':message.command,'arg':message.arg}, message.to):
 					message.reply('Failed to send the push notification to your device.')
 		else:
 			message.reply('List of supported commands:\n/help device — Requests the list of commands your device supports.\n/ping — Pings your device.\n/send [name]: [text] — Sends the specified text to the specified contact. In case of multiple matches for the name parameter, you will receive an error.\n/chat [name] — Opens a new session in your Jabber/Talk client from [name]%s, and any message entered here will be sent directly to this contact.\nThe name parameter can be a partial or full name or phone number. In case multiple phone numbers are associated to the same contact, you can append /N to the parameter where N is the index of the phone number as listed by /contact.' % (XMPRIV))
@@ -276,17 +288,17 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 	def chat_command(self, message=None):
 		"""
 			Opens a new session by replying from a different address dedicated to the user specified in the parameters.
-			The name is cleaned by converting unicode to their ASCII representation and stripping non-alphanumeric characters.
-			For example "Árvíztűrő-tükörfúrógép" will become "arvizturo.tukorfurogep".
+			This is now handled on the client-side, therefore a push notification is required to get the
+			proper address for the specified contant.
 		"""
 		
 		user = self.get_user(message)
 		if not user:
 			return
 		
-		message.reply('Opening dedicated chat window with %s...' % (message.arg))
-		src = re.sub("(^\.+|(?<=\.)\.+|\.+$)", "", re.sub("[^a-z0-9]", ".", unicodedata.normalize('NFKD', message.arg.lower()).encode('ascii', 'ignore').lower()))
-		xmpp.send_message(message.sender, 'All messages in this window will be forwarded to %s.' % (message.arg), src + XMPRIV)
+		message.reply('Pushing request for dedicated chat window with %s...' % (message.arg))
+		if not self.send_gcm(user.regid, {'action':'chat','with':message.arg,'addr':XMPRIV}, message.to):
+			message.reply('Failed to send the push notification to your device.')
 	
 	def unhandled_command(self, message=None):
 		"""
@@ -339,8 +351,8 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 			Pushes a notification to the device through Google Cloud Messaging.
 		"""
 		
-		if not xmback is None or xmback != XMPUB:
-			data['_addr'] = xmback
+		if not xmback is None and not XMPUB in xmback:
+			data['_addr'] = xmback.split('/')[0]
 		
 		if xmpriv:
 			data['_priv'] = True
@@ -399,5 +411,6 @@ app = webapp2.WSGIApplication([
 	('/pingback', PingbackHandler),
 	('/_ah/xmpp/message/error/', ErrorHandler),
 	('/_ah/xmpp/presence/(available|unavailable)/', PresenceHandler),
+	('/_ah/xmpp/presence/probe/', ProbeHandler),
 	('/_ah/xmpp/message/chat/', XmppHandler),
 ], debug=True)
