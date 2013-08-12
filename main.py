@@ -200,6 +200,11 @@ class PresenceHandler(webapp2.RequestHandler):
 		"""
 		
 		sender = self.request.get('from')
+		
+		if status == 'probe':
+			xmpp.send_presence(sender, None, self.request.get('to'), PRESENCE_TYPE_AVAILABLE)
+			status = 'available'
+		
 		logging.info('User %s is now %s.' % (sender, status))
 		
 		if '/gmail.' in sender or '/GVGW' in sender:
@@ -221,14 +226,6 @@ class PresenceHandler(webapp2.RequestHandler):
 			user.put()
 		except Exception, err:
 			logging.error('Unable to save lastjid=%s && status=%s for user %s: %s' % (sender, stauts, gacc, str(err)))
-
-class ProbeHandler(webapp2.RequestHandler):
-	def post(self):
-		"""
-			Dummy handler until I figure out what is POSTed.
-		"""
-		
-		logging.info('POST data: %s' % (json.dumps(self.request.POST)))
 
 class XmppHandler(xmpp_handlers.CommandHandler):
 	def help_command(self, message=None):
@@ -410,7 +407,6 @@ app = webapp2.WSGIApplication([
 	('/register', RegistrationHandler),
 	('/pingback', PingbackHandler),
 	('/_ah/xmpp/message/error/', ErrorHandler),
-	('/_ah/xmpp/presence/(available|unavailable)/', PresenceHandler),
-	('/_ah/xmpp/presence/probe/', ProbeHandler),
+	('/_ah/xmpp/presence/(available|unavailable|probe)/', PresenceHandler),
 	('/_ah/xmpp/message/chat/', XmppHandler),
 ], debug=True)

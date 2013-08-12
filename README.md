@@ -24,7 +24,7 @@ Check out the repository of the client-side Android application for full documen
 
 List of server-side commands supported in the current commit:
 
-### /help [server|device]
+### /help [server*|device]
 
 The server or device replies with the list of commands it supports including some minimal explanation of what they do. The device reply may take up to 2 minutes to complete if your device is in deep sleep. The default parameter is the server's response.
 
