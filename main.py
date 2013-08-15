@@ -160,6 +160,7 @@ class PingbackHandler(webapp2.RequestHandler):
 		
 		gacc = self.request.get('gacc')
 		then = float(self.request.get('time'))
+		sender = self.request.get('from')
 		to = gacc
 		
 		user = User.get_by_key_name(gacc)
@@ -172,11 +173,23 @@ class PingbackHandler(webapp2.RequestHandler):
 		else:
 			to = user.lastjid
 		
+		if not sender:
+			src = XMPUB
+		elif sender == XMPUB or XMPRIV in sender:
+			src = sender
+		else:
+			src = re.sub("(^\.+|(?<=\.)\.+|\.+$)", "", re.sub("[^a-z0-9\\-_\\.]", ".", unicodedata.normalize('NFKD', sender.lower()).encode('ascii', 'ignore').lower()))
+			src = src + XMPRIV
+		
+		prep = ''
+		if XMPRIV in src:
+			prep = '*** '
+		
 		now = time.time()
 		diff = now - then
 		
 		logging.info('Pingback received from %s\'s device after %.7f seconds.' % (gacc, diff))		
-		xmpp.send_message(to, 'Pingback received from device after %.3f seconds.' % (diff), XMPUB)
+		xmpp.send_message(to, '%sPingback received from device after %.3f seconds.' % (prep, diff), src)
 		self.response.write(json.dumps({"res":"ok"}))
 
 class ErrorHandler(webapp2.RequestHandler):
@@ -237,16 +250,20 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 		user = self.get_user(message)
 		if not user:
 			return
+			
+		prep = ''
+		if XMPRIV in message.to:
+			prep = '*** '
 		
 		if message.arg == "device":
 			if not FWDCMD:
-				message.reply('This server does not forward unhandled commands to the device.')
+				message.reply('%sThis server does not forward unhandled commands to the device.' % (prep))
 			else:
-				message.reply('Pushing help request to your device...')
-				if not self.send_gcm(user.regid, {'action':'cmd','cmd':message.command,'arg':message.arg}, message.to):
-					message.reply('Failed to send the push notification to your device.')
+				message.reply('%sPushing help request to your device...' % (prep))
+				if not self.send_gcm(user.regid, {'action':'cmd','cmd':message.command,'arg':message.arg}, message.to, XMPRIV in message.to):
+					message.reply('%sFailed to send the push notification to your device.' % (prep))
 		else:
-			message.reply('List of supported commands:\n/help device — Requests the list of commands your device supports.\n/ping — Pings your device.\n/send [name]: [text] — Sends the specified text to the specified contact. In case of multiple matches for the name parameter, you will receive an error.\n/chat [name] — Opens a new session in your Jabber/Talk client from [name]%s, and any message entered here will be sent directly to this contact.\nThe name parameter can be a partial or full name or phone number. In case multiple phone numbers are associated to the same contact, you can append /N to the parameter where N is the index of the phone number as listed by /contact.' % (XMPRIV))
+			message.reply('%sList of supported commands:\n/help device — Requests the list of commands your device supports.\n/ping — Pings your device.\n/send [name]: [text] — Sends the specified text to the specified contact. In case of multiple matches for the name parameter, you will receive an error.\n/chat [name] — Opens a new session in your Jabber/Talk client from [name]%s, and any message entered here will be sent directly to this contact.\nThe name parameter can be a partial or full name or phone number. In case multiple phone numbers are associated to the same contact, you can append /N to the parameter where N is the index of the phone number as listed by /contact.' % (prep, XMPRIV))
 	
 	def ping_command(self, message=None):
 		"""
@@ -259,9 +276,13 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 		if not user:
 			return
 		
-		message.reply('Pushing ping notification to your device...')
-		if not self.send_gcm(user.regid, {'action':'ping','time':time.time()}, message.to):
-			message.reply('Failed to send the push notification to your device.')
+		prep = ''
+		if XMPRIV in message.to:
+			prep = '*** '
+		
+		message.reply('%sPushing ping notification to your device...' % (prep))
+		if not self.send_gcm(user.regid, {'action':'ping','time':time.time()}, message.to, XMPRIV in message.to):
+			message.reply('%sFailed to send the push notification to your device.' % (prep))
 	
 	def send_command(self, message=None):
 		"""
@@ -272,15 +293,19 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 		if not user:
 			return
 		
+		prep = ''
+		if XMPRIV in message.to:
+			prep = '*** '
+		
 		if not ':' in message.arg:
-			message.reply('Invalid parameters: name/text separator was not found.')
+			message.reply('%sInvalid parameters: name/text separator was not found.' % (prep))
 			return
 		
 		contact = message.arg.split(':', 2)[0].strip()
 		body = message.arg.split(':', 2)[1].strip()
-		message.reply('Pushing message for %s: "%s"' % (contact, ('%s[...]' % (body[:50])) if body.__len__() > 50 else body))
-		if not self.send_gcm(user.regid, {'action':'text','to':contact,'body':body}, message.to):
-			message.reply('Failed to send the push notification to your device.')
+		message.reply('%sPushing message for %s: "%s"' % (prep, contact, ('%s[...]' % (body[:50])) if body.__len__() > 50 else body))
+		if not self.send_gcm(user.regid, {'action':'text','to':contact,'body':body}, message.to, XMPRIV in message.to):
+			message.reply('%sFailed to send the push notification to your device.' % (prep))
 	
 	def chat_command(self, message=None):
 		"""
@@ -293,9 +318,13 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 		if not user:
 			return
 		
-		message.reply('Pushing request for dedicated chat window with %s...' % (message.arg))
-		if not self.send_gcm(user.regid, {'action':'chat','with':message.arg,'addr':XMPRIV}, message.to):
-			message.reply('Failed to send the push notification to your device.')
+		prep = ''
+		if XMPRIV in message.to:
+			prep = '*** '
+		
+		message.reply('%sPushing request for dedicated chat window with %s...' % (prep, message.arg))
+		if not self.send_gcm(user.regid, {'action':'chat','with':message.arg}, message.to, XMPRIV in message.to):
+			message.reply('%sFailed to send the push notification to your device.' % (prep))
 	
 	def unhandled_command(self, message=None):
 		"""
@@ -317,7 +346,7 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 			return
 		
 		message.reply('%sPushing command %s to device...' % (prep, message.command))
-		if not self.send_gcm(user.regid, {'action':'cmd','cmd':message.command,'arg':message.arg}, message.to):
+		if not self.send_gcm(user.regid, {'action':'cmd','cmd':message.command,'arg':message.arg}, message.to, XMPRIV in message.to):
 			message.reply('%sFailed to send the push notification to your device.' % (prep))
 	
 	def text_message(self, message=None):
@@ -349,7 +378,7 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 		"""
 		
 		if not xmback is None and not XMPUB in xmback:
-			data['_addr'] = xmback.split('/')[0]
+			data['_addr'] = xmback.split('/')[0].split(XMPRIV)[0]
 		
 		if xmpriv:
 			data['_priv'] = True
