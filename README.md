@@ -42,11 +42,7 @@ To find out how the name parameter works, refer to `/chat`.
 
 Opens a new chat window dedicated to *name*. Anything sent to that window will be forwarded as an SMS, with the exception of commands. (Anything that starts with `/`.)
 
-The way this works, is that instead of talking to `rstxtfwd.appspot.com` the application will clean the *name* parameter and send you a message from `name@rstxtfwd.appspotchat.com`.
-
-The *name* can be a phone number or either full or partial name. The action will be carried out on the first match. If a contact has multiple phone numbers, you can append `/N` to the name where `N` is the index of the phone number as seen in your address book, starting from 0.
-
-To make sure your first match is the actual number you're looking for, you can play around with `/contact`.
+Check out the client's documentation on how the name parameter is handled.
 
 ### /.*
 

@@ -97,7 +97,7 @@ class SendHandler(webapp2.RequestHandler):
 		elif sender == XMPUB or XMPRIV in sender:
 			src = sender
 		else:
-			src = re.sub("(^\.+|(?<=\.)\.+|\.+$)", "", re.sub("[^a-z0-9]", ".", unicodedata.normalize('NFKD', sender.lower()).encode('ascii', 'ignore').lower()))
+			src = re.sub("(^\.+|(?<=\.)\.+|\.+$)", "", re.sub("[^a-z0-9\\-_\\.]", ".", unicodedata.normalize('NFKD', sender.lower()).encode('ascii', 'ignore').lower()))
 			src = src + XMPRIV
 		
 		logging.info('Sending XMPP from %s to %s: %s' % (src, to, body))
@@ -202,7 +202,7 @@ class PresenceHandler(webapp2.RequestHandler):
 		sender = self.request.get('from')
 		
 		if status == 'probe':
-			xmpp.send_presence(sender, None, self.request.get('to'), PRESENCE_TYPE_AVAILABLE)
+			xmpp.send_presence(sender, None, self.request.get('to'), xmpp.PRESENCE_TYPE_AVAILABLE)
 			status = 'available'
 		
 		logging.info('User %s is now %s.' % (sender, status))
