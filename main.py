@@ -100,6 +100,9 @@ class SendHandler(webapp2.RequestHandler):
 			src = re.sub("(^\.+|(?<=\.)\.+|\.+$)", "", re.sub("[^a-z0-9\\-_\\.]", ".", unicodedata.normalize('NFKD', sender.lower()).encode('ascii', 'ignore').lower()))
 			src = src + XMPRIV
 		
+		if not body:
+			body = '%sEmpty response received from device.' % ('*** ' if XMPRIV in sender else '')
+		
 		logging.info('Sending XMPP from %s to %s: %s' % (src, to, body))
 		
 		try:
