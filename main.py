@@ -23,6 +23,11 @@ import json
 import re
 import unicodedata
 import time
+import base64
+
+from Crypto.Hash import SHA
+from Crypto.PublicKey import RSA
+from Crypto.Signature import PKCS1_v1_5
 
 from google.appengine.api import urlfetch
 from google.appengine.api import xmpp
@@ -49,6 +54,8 @@ class User(db.Model):
 	
 	email = db.StringProperty()
 	regid = db.StringProperty()
+	pubkey = db.StringProperty()
+	counter = db.IntegerProperty()
 	lastjid = db.StringProperty()
 	presence = db.StringProperty(choices=set(['unknown', 'available', 'unavailable']))
 	
@@ -76,9 +83,10 @@ class SendHandler(webapp2.RequestHandler):
 			immediate error message if the delivery failed. If not, it'll receive in ErrorHandler.
 		"""
 		
-		gacc = self.request.get('gacc')
-		sender = self.request.get('from')
-		body = self.request.get('body')
+		gacc = self.request.POST['gacc']
+		sender = self.request.POST['from']
+		body = self.request.POST['body']
+		counter = long(self.request.POST['cntr'])
 		to = gacc
 		err = None
 		
@@ -86,6 +94,27 @@ class SendHandler(webapp2.RequestHandler):
 		if user is None:
 			self.response.write(json.dumps({"res":"err","err":"Unknown user."}))
 			return
+		
+		if not 'X-Key' in self.request.headers:
+			self.response.write(json.dumps({"res":"err","err":"Signature required."}))
+			return
+		
+		temp = urllib.unquote(self.request.body).replace('+', ' ')
+		
+		hash = SHA.new(temp)
+		verifier = PKCS1_v1_5.new(RSA.importKey(base64.standard_b64decode(user.pubkey)))
+		signature = base64.standard_b64decode(self.request.headers['X-Key'])
+		
+		if not verifier.verify(hash, signature):
+			self.response.write(json.dumps({"res":"err","err":"Signature invalid."}))
+			return
+		
+		if counter <= user.counter:
+			self.response.write(json.dumps({"res":"err","err":"Counter too low."}))
+			return
+		else:
+			user.counter = counter
+			user.put()
 		
 		if not user.lastjid:
 			to = user.email
@@ -123,9 +152,10 @@ class RegistrationHandler(webapp2.RequestHandler):
 			XMPP address. Old registrations for the same Google Account will be discarded.
 		"""
 		
-		gacc = self.request.get('gacc')
-		email = self.request.get('email')
-		regid = self.request.get('regid')
+		gacc = self.request.POST['gacc']
+		email = self.request.POST['email']
+		regid = self.request.POST['regid']
+		pubkey = self.request.POST['pbkey']
 		
 		user = User.get_by_key_name(gacc)
 		if not user is None:
@@ -139,6 +169,8 @@ class RegistrationHandler(webapp2.RequestHandler):
 			user = User(key_name=gacc)
 			user.email = email
 			user.regid = regid
+			user.pubkey = pubkey
+			user.counter = 1
 			user.lastjid = email
 			user.presence = 'unknown'
 			user.put()
@@ -161,15 +193,37 @@ class PingbackHandler(webapp2.RequestHandler):
 			See ping_command in XmppHandler for the counterpart.
 		"""
 		
-		gacc = self.request.get('gacc')
-		then = float(self.request.get('time'))
-		sender = self.request.get('from')
+		gacc = self.request.POST['gacc']
+		then = float(self.request.POST['time'])
+		sender = self.request.POST['from']
+		counter = long(self.request.POST['cntr'])
 		to = gacc
 		
 		user = User.get_by_key_name(gacc)
 		if user is None:
 			self.response.write(json.dumps({"res":"err","err":"Unknown user."}))
 			return
+		
+		if not 'X-Key' in self.request.headers:
+			self.response.write(json.dumps({"res":"err","err":"Signature required."}))
+			return
+		
+		temp = urllib.unquote(self.request.body).replace('+', ' ')
+		
+		hash = SHA.new(temp)
+		verifier = PKCS1_v1_5.new(RSA.importKey(base64.standard_b64decode(user.pubkey)))
+		signature = base64.standard_b64decode(self.request.headers['X-Key'])
+		
+		if not verifier.verify(hash, signature):
+			self.response.write(json.dumps({"res":"err","err":"Signature invalid."}))
+			return
+		
+		if counter <= user.counter:
+			self.response.write(json.dumps({"res":"err","err":"Counter too low."}))
+			return
+		else:
+			user.counter = counter
+			user.put()
 		
 		if not user.lastjid:
 			to = user.email
@@ -266,7 +320,7 @@ class XmppHandler(xmpp_handlers.CommandHandler):
 				if not self.send_gcm(user.regid, {'action':'cmd','cmd':message.command,'arg':message.arg}, message.to, XMPRIV in message.to):
 					message.reply('%sFailed to send the push notification to your device.' % (prep))
 		else:
-			message.reply('%sList of supported commands:\n/help device — Requests the list of commands your device supports.\n/ping — Pings your device.\n/send [name]: [text] — Sends the specified text to the specified contact. In case of multiple matches for the name parameter, you will receive an error.\n/chat [name] — Opens a new session in your Jabber/Talk client from [name]%s, and any message entered here will be sent directly to this contact.\nThe name parameter can be a partial or full name or phone number. In case multiple phone numbers are associated to the same contact, you can append /N to the parameter where N is the index of the phone number as listed by /contact.' % (prep, XMPRIV))
+			message.reply('%sList of supported commands:\n/help device -- Requests the list of commands your device supports.\n/ping -- Pings your device.\n/send [name]: [text] -- Sends the specified text to the specified contact. In case of multiple matches for the name parameter, you will receive an error.\n/chat [name] -- Opens a new session in your Jabber/Talk client from [name]%s, and any message entered here will be sent directly to this contact.\nThe name parameter can be a partial or full name or phone number. In case multiple phone numbers are associated to the same contact, you can append /N to the parameter where N is the index of the phone number as listed by /contact.' % (prep, XMPRIV))
 	
 	def ping_command(self, message=None):
 		"""
