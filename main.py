@@ -86,7 +86,6 @@ class SendHandler(webapp2.RequestHandler):
 		gacc = self.request.POST['gacc']
 		sender = self.request.POST['from']
 		body = self.request.POST['body']
-		counter = long(self.request.POST['cntr'])
 		to = gacc
 		err = None
 		
@@ -95,15 +94,17 @@ class SendHandler(webapp2.RequestHandler):
 			self.response.write(json.dumps({"res":"err","err":"Unknown user."}))
 			return
 		
-		if not 'X-Key' in self.request.headers:
+		if not 'X-Signature' in self.request.headers:
 			self.response.write(json.dumps({"res":"err","err":"Signature required."}))
 			return
 		
-		temp = urllib.unquote(self.request.body).replace('+', ' ')
+		xsign = self.request.headers['X-Signature'].split(' ', 2)
+		counter = long(xsign[0], 36)
+		temp = str(counter) + '&' + urllib.unquote(self.request.body).replace('+', ' ')
 		
 		hash = SHA.new(temp)
 		verifier = PKCS1_v1_5.new(RSA.importKey(base64.standard_b64decode(user.pubkey)))
-		signature = base64.standard_b64decode(self.request.headers['X-Key'])
+		signature = base64.standard_b64decode(xsign[1])
 		
 		if not verifier.verify(hash, signature):
 			self.response.write(json.dumps({"res":"err","err":"Signature invalid."}))
@@ -196,7 +197,6 @@ class PingbackHandler(webapp2.RequestHandler):
 		gacc = self.request.POST['gacc']
 		then = float(self.request.POST['time'])
 		sender = self.request.POST['from']
-		counter = long(self.request.POST['cntr'])
 		to = gacc
 		
 		user = User.get_by_key_name(gacc)
@@ -204,15 +204,17 @@ class PingbackHandler(webapp2.RequestHandler):
 			self.response.write(json.dumps({"res":"err","err":"Unknown user."}))
 			return
 		
-		if not 'X-Key' in self.request.headers:
+		if not 'X-Signature' in self.request.headers:
 			self.response.write(json.dumps({"res":"err","err":"Signature required."}))
 			return
 		
-		temp = urllib.unquote(self.request.body).replace('+', ' ')
+		xsign = self.request.headers['X-Signature'].split(' ', 2)
+		counter = long(xsign[0], 36)
+		temp = str(counter) + '&' + urllib.unquote(self.request.body).replace('+', ' ')
 		
 		hash = SHA.new(temp)
 		verifier = PKCS1_v1_5.new(RSA.importKey(base64.standard_b64decode(user.pubkey)))
-		signature = base64.standard_b64decode(self.request.headers['X-Key'])
+		signature = base64.standard_b64decode(xsign[1])
 		
 		if not verifier.verify(hash, signature):
 			self.response.write(json.dumps({"res":"err","err":"Signature invalid."}))
